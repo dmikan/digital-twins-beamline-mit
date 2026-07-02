@@ -134,22 +134,23 @@ class ParticleState:
 class Beam:
 
     def __init__(self, species, position, velocity):
+
         self.species = species
+
         self.position = np.asarray(position, dtype=float)
         self.velocity = np.asarray(velocity, dtype=float)
-        self.n_particles = self.position.shape[0] if self.position.ndim > 1 else 1
-        self.alive = np.ones(self.n_particles, dtype=bool)
 
         if self.position.ndim == 1:
-            self.state = ParticleState(
-                position=self.position,
-                velocity=self.velocity,
-            )
-        else:
-            self.state = ParticleState(
-                position=self.position[0],
-                velocity=self.velocity[0],
-            )
+            self.position = self.position[None, :]
+            self.velocity = self.velocity[None, :]
+
+        self.n_particles = self.position.shape[0]
+        self.alive = np.ones(self.n_particles, dtype=bool)
+
+        self.state = ParticleState(
+            position=self.position,
+            velocity=self.velocity,
+        )
 
 class Trajectory:
     def __init__(self, beam):
@@ -179,7 +180,6 @@ class RK4Integrator:
         """
         state = trajectory.initial_state
         species = trajectory.species  # captured once; _derivative has no access to `trajectory`
-
         for _ in range(num_steps):
             k1 = self._derivative(state, species)
             k2 = self._derivative(ParticleState(state.position + 0.5 * dt * k1[0],
@@ -238,7 +238,7 @@ integrator = RK4Integrator(fieldData)
 # -------------------------------
 # Beam parameters
 # -------------------------------
-N = 1000
+N = 500
 
 u = 1.66053906660e-27      # kg
 e = 1.602176634e-19        # C
@@ -300,33 +300,29 @@ speeds = 1000*np.sqrt(2*energies/mass) #quedan en mm/s
 
 start_velocities = np.zeros((N,3))
 start_velocities = speeds[:, None] * directions   # dirección (-1,0,0)
-
+dt = 5e-8
+num_steps = 5000
+import time
+start_time = time.time()
 beam_multi = Beam(
     species=species,
     position=start_positions,
     velocity=start_velocities,
 )
-dt = 1e-8
-num_steps = 5000
-print("dt =", dt)
+multi_beam_traj = Trajectory(beam_multi)
+integrator.integrate(multi_beam_traj, dt, num_steps)
+fin = time.time()-start_time
+print(fin)
 
-print("Primer desplazamiento")
-print(np.linalg.norm(start_velocities[0]) * dt)
+positions_multi = np.array([
+    state.position
+    for state in multi_beam_traj.states
+])
+disp = positions_multi[1] - positions_multi[0]
 
-fieldData.summary()
-positions_multi = []
-for i in range(beam_multi.n_particles):
-    particle_beam = Beam(
-        species=species,
-        position=start_positions[i],
-        velocity=start_velocities[i],
-    )
-    particle_traj = Trajectory(particle_beam)
-    integrator.integrate(particle_traj, dt, num_steps)
-    positions_multi.append(np.array([state.position for state in particle_traj.states]))
-
-positions_multi = np.array(positions_multi)
-
+print(disp[:5])
+print(np.linalg.norm(disp, axis=1)[:5])
+print((start_velocities * dt)[:5])
 # --- Downsampling stride, since plotting every grid point is usually unreadable ---
 stride = 4  # increase if the plot looks too dense/cluttered, decrease for more detail
 
