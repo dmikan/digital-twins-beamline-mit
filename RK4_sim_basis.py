@@ -1,6 +1,7 @@
 import numpy as np
 from pathlib import Path
 from scipy.interpolate import RegularGridInterpolator
+import optimizer as op
 
 class BasisFieldMap:
     def __init__(self, basis_files):
@@ -46,9 +47,10 @@ class BasisFieldMap:
         Convenience constructor: build the ordered file list from a
         directory + naming pattern instead of listing files by hand.
         """
+        pattern = str(pattern)
         directory = Path(directory)
         files = []
-        for i in range(start_index, start_index + n_electrodes):
+        for i in range(start_index, n_electrodes+ start_index):
             fpath = directory / pattern.format(i=i)
             if not fpath.exists():
                 raise FileNotFoundError(f"Expected basis file not found: {fpath}")
@@ -256,7 +258,7 @@ def random_voltage_demo(bfm, n_samples=2, voltage_range=(-1000.0, 1000.0)):
         center = np.array([[bfm.x.mean(), bfm.y.mean(), bfm.z.mean()]])
         print("Field at grid center:", bfm.field(center))
 
-# class FieldMap:
+class FieldMap:
 
     def __init__(self, filename):
 
@@ -470,177 +472,188 @@ class RK4Integrator:
         return (state.velocity, acceleration)
 
 # First attempt at loading potential basis files and creating a field map. Adjust the path as needed.
+if __name__ == "__main__":
+    df = pd.read_csv("beamline_results.csv")
+    X = df[
+            "params_V3",
+            "params_V6",
+            "params_V9",
+            "params_V10",
+            "params_V11",
+            "params_V12",
+            "params_V15",
+            "params_V18",
+            ]
+    directory = './'
+    n_electrodes = 19  # Adjust this to the actual number of electrodes you have
+    bfm = BasisFieldMap.from_directory(directory, n_electrodes=n_electrodes)
+    bfm.set_voltages([500.0, 0.0, -895.921163747548, 0.0, 0.0, 689.815550200552, 0.0, 0.0 , -33.2956871479055, 778.366815914241, 331.740232885476, -352.050845144708, 0.0, 0.0, 376.220581070828, 0.0, 0.0, -123.329027787132, -2000])  # Initialize with zero voltages
+    bfm.summary()
 
-directory = './'
-n_electrodes = 19  # Adjust this to the actual number of electrodes you have
-bfm = BasisFieldMap.from_directory(directory, n_electrodes=n_electrodes)
-bfm.set_voltages([500.0, 0.0, -895.921163747548, 0.0, 0.0, 689.815550200552, 0.0, 0.0 , -33.2956871479055, 778.366815914241, 331.740232885476, -352.050845144708, 0.0, 0.0, 376.220581070828, 0.0, 0.0, -123.329027787132, -2000])  # Initialize with zero voltages
-bfm.summary()
+    fieldData = bfm  # Evaluate the field at all grid points
 
-fieldData = bfm  # Evaluate the field at all grid points
+    # fieldData.summary()
 
-# fieldData.summary()
+    print("Coordinate grid shape:", fieldData.coords.shape)
+    # print("Field vector shape:", fieldData.E.shape)
+    # print("Combined coord+field shape:", fieldData.coord_field.shape)
 
-print("Coordinate grid shape:", fieldData.coords.shape)
-# print("Field vector shape:", fieldData.E.shape)
-# print("Combined coord+field shape:", fieldData.coord_field.shape)
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+    # --- Experiment bounds in mm ---
+    x_min, x_max = 0.0, 484.0
+    y_min, y_max = 0.0, 153.0
+    z_min, z_max = 0.0, 484.0
 
-# --- Experiment bounds in mm ---
-x_min, x_max = 0.0, 484.0
-y_min, y_max = 0.0, 153.0
-z_min, z_max = 0.0, 484.0
+    print(f"Experiment size (mm): x={x_min:.1f}-{x_max:.1f}, y={y_min:.1f}-{y_max:.1f}, z={z_min:.1f}-{z_max:.1f}")
 
-print(f"Experiment size (mm): x={x_min:.1f}-{x_max:.1f}, y={y_min:.1f}-{y_max:.1f}, z={z_min:.1f}-{z_max:.1f}")
+    integrator = RK4Integrator(fieldData)
+    # --- Extra beam with N particles and a gaussian spread ---
+    # -------------------------------
+    # Beam parameters
+    # -------------------------------
+    N = 500
 
-integrator = RK4Integrator(fieldData)
-# --- Extra beam with N particles and a gaussian spread ---
-# -------------------------------
-# Beam parameters
-# -------------------------------
-N = 500
+    u = 1.66053906660e-27      # kg
+    e = 1.602176634e-19        # C
 
-u = 1.66053906660e-27      # kg
-e = 1.602176634e-19        # C
+    mass = 28 * u
+    charge = 1 * e
 
-mass = 28 * u
-charge = 1 * e
+    species = IonSpecies(
+        mass=mass,
+        charge=charge
+    )
 
-species = IonSpecies(
-    mass=mass,
-    charge=charge
-)
+    # -------------------------------
+    # Initial position
+    # -------------------------------
+    start_positions = np.zeros((N,3))
+    start_positions[:] = [395.0,75.0,77.0]      
 
-# -------------------------------
-# Initial position
-# -------------------------------
-start_positions = np.zeros((N,3))
-start_positions[:] = [395.0,75.0,77.0]      
+    # -------------------------------
+    # Energy distribution
+    # -------------------------------
+    mean_energy = 15.0      # eV
+    std_energy = 0.42466    # eV
 
-# -------------------------------
-# Energy distribution
-# -------------------------------
-mean_energy = 15.0      # eV
-std_energy = 0.42466    # eV
+    energies = np.random.normal(
+        mean_energy,
+        std_energy,
+        N
+    )
 
-energies = np.random.normal(
-    mean_energy,
-    std_energy,
-    N
-)
+    # Evitar energías negativas
+    energies = np.clip(energies,0,None)
 
-# Evitar energías negativas
-energies = np.clip(energies,0,None)
+    # Convertir a Joules
+    energies *= e
 
-# Convertir a Joules
-energies *= e
+    # ============================================================
+    # Angular cone (SIMION half-angle = 15°)
+    # ============================================================
+    half_angle = np.deg2rad(15)
 
-# ============================================================
-# Angular cone (SIMION half-angle = 15°)
-# ============================================================
-half_angle = np.deg2rad(15)
+    cos_theta = np.random.uniform(np.cos(half_angle), 1.0, N)
+    theta = np.arccos(cos_theta)
+    phi = np.random.uniform(0, 2*np.pi, N)
 
-cos_theta = np.random.uniform(np.cos(half_angle), 1.0, N)
-theta = np.arccos(cos_theta)
-phi = np.random.uniform(0, 2*np.pi, N)
+    directions = np.empty((N,3))
 
-directions = np.empty((N,3))
+    # eje del cono = (-1,0,0)
+    directions[:,0] = -np.cos(theta)
+    directions[:,1] =  np.sin(theta)*np.cos(phi)
+    directions[:,2] =  np.sin(theta)*np.sin(phi)
 
-# eje del cono = (-1,0,0)
-directions[:,0] = -np.cos(theta)
-directions[:,1] =  np.sin(theta)*np.cos(phi)
-directions[:,2] =  np.sin(theta)*np.sin(phi)
+    # Normalizar por seguridad
+    directions /= np.linalg.norm(directions, axis=1)[:,None]
+    # -------------------------------
+    # Initial velocities
+    # -------------------------------
+    speeds = 1000*np.sqrt(2*energies/mass) #quedan en mm/s
 
-# Normalizar por seguridad
-directions /= np.linalg.norm(directions, axis=1)[:,None]
-# -------------------------------
-# Initial velocities
-# -------------------------------
-speeds = 1000*np.sqrt(2*energies/mass) #quedan en mm/s
+    start_velocities = np.zeros((N,3))
+    start_velocities = speeds[:, None] * directions   # dirección (-1,0,0)
+    dt = 5e-8
+    num_steps = 5000
+    import time
+    start_time = time.time()
+    beam_multi = Beam(
+        species=species,
+        position=start_positions,
+        velocity=start_velocities,
+    )
+    multi_beam_traj = Trajectory(beam_multi)
+    integrator.integrate(multi_beam_traj, dt, num_steps)
+    fin = time.time()-start_time
+    print(fin)
 
-start_velocities = np.zeros((N,3))
-start_velocities = speeds[:, None] * directions   # dirección (-1,0,0)
-dt = 5e-8
-num_steps = 5000
-import time
-start_time = time.time()
-beam_multi = Beam(
-    species=species,
-    position=start_positions,
-    velocity=start_velocities,
-)
-multi_beam_traj = Trajectory(beam_multi)
-integrator.integrate(multi_beam_traj, dt, num_steps)
-fin = time.time()-start_time
-print(fin)
-
-positions_multi = np.array([
-    state.position
-    for state in multi_beam_traj.states
-])
-disp = positions_multi[1] - positions_multi[0]
-
-print(disp[:5])
-print(np.linalg.norm(disp, axis=1)[:5])
-print((start_velocities * dt)[:5])
-# --- Downsampling stride, since plotting every grid point is usually unreadable ---
-stride = 4  # increase if the plot looks too dense/cluttered, decrease for more detail
-
-coords = fieldData.coords[::stride, ::stride, ::stride]
-E = fieldData.E[::stride, ::stride, ::stride]
-
-X, Y, Z = coords[..., 0], coords[..., 1], coords[..., 2]
-Ex, Ey, Ez = E[..., 0], E[..., 1], E[..., 2]
-
-fig = plt.figure(figsize=(9, 7))
-ax = fig.add_subplot(111, projection="3d")
-
-# normalize arrow length for readability; magnitude is still encoded via color
-E_mag = np.sqrt(Ex**2 + Ey**2 + Ez**2)
-
-quiver = ax.quiver(
-    X, Y, Z, Ex, Ey, Ez,
-    length=0.5 * min(x_max - x_min, y_max - y_min, z_max - z_min) / max(coords.shape[:3]),
-    normalize=True,
-    cmap="viridis",
-)
-
-# draw the bounding box wireframe
-def draw_box(ax, xmin, xmax, ymin, ymax, zmin, zmax, **kwargs):
-    corners = np.array([
-        [xmin, ymin, zmin], [xmax, ymin, zmin], [xmax, ymax, zmin], [xmin, ymax, zmin],
-        [xmin, ymin, zmax], [xmax, ymin, zmax], [xmax, ymax, zmax], [xmin, ymax, zmax],
+    positions_multi = np.array([
+        state.position
+        for state in multi_beam_traj.states
     ])
-    edges = [
-        (0,1),(1,2),(2,3),(3,0),  # bottom
-        (4,5),(5,6),(6,7),(7,4),  # top
-        (0,4),(1,5),(2,6),(3,7),  # verticals
-    ]
-    for i, j in edges:
-        ax.plot(*zip(corners[i], corners[j]), **kwargs)
+    disp = positions_multi[1] - positions_multi[0]
 
-draw_box(ax, x_min, x_max, y_min, y_max, z_min, z_max, color="red", lw=1, linestyle="--")
+    print(disp[:5])
+    print(np.linalg.norm(disp, axis=1)[:5])
+    print((start_velocities * dt)[:5])
+    # --- Downsampling stride, since plotting every grid point is usually unreadable ---
+    stride = 4  # increase if the plot looks too dense/cluttered, decrease for more detail
 
-# plot every path from the 100-particle beam
-for path in positions_multi:
-    ax.plot(path[:, 0], path[:, 1], path[:, 2], color="blue", lw=0.5, alpha=0.25)
+    coords = fieldData.coords[::stride, ::stride, ::stride]
+    E = fieldData.E[::stride, ::stride, ::stride]
 
-ax.scatter(positions_multi[:, 0, 0], positions_multi[:, 0, 1], positions_multi[:, 0, 2], color="royalblue", s=20, label="100-particle starts")
+    X, Y, Z = coords[..., 0], coords[..., 1], coords[..., 2]
+    Ex, Ey, Ez = E[..., 0], E[..., 1], E[..., 2]
 
-ax.set_xlabel("x")
-ax.set_ylabel("y")
-ax.set_zlabel("z")
-ax.set_title("Electric Field Map with Particle Trajectory")
-ax.set_xlim(x_min, x_max)
-ax.set_ylim(y_min, y_max)
-ax.set_zlim(z_min, z_max)
-ax.legend(loc="upper right")
+    fig = plt.figure(figsize=(9, 7))
+    ax = fig.add_subplot(111, projection="3d")
 
-plt.tight_layout()
-plt.savefig("field_map.png", dpi=150)
-plt.show()
+    # normalize arrow length for readability; magnitude is still encoded via color
+    E_mag = np.sqrt(Ex**2 + Ey**2 + Ez**2)
+
+    quiver = ax.quiver(
+        X, Y, Z, Ex, Ey, Ez,
+        length=0.5 * min(x_max - x_min, y_max - y_min, z_max - z_min) / max(coords.shape[:3]),
+        normalize=True,
+        cmap="viridis",
+    )
+
+    # draw the bounding box wireframe
+    def draw_box(ax, xmin, xmax, ymin, ymax, zmin, zmax, **kwargs):
+        corners = np.array([
+            [xmin, ymin, zmin], [xmax, ymin, zmin], [xmax, ymax, zmin], [xmin, ymax, zmin],
+            [xmin, ymin, zmax], [xmax, ymin, zmax], [xmax, ymax, zmax], [xmin, ymax, zmax],
+        ])
+        edges = [
+            (0,1),(1,2),(2,3),(3,0),  # bottom
+            (4,5),(5,6),(6,7),(7,4),  # top
+            (0,4),(1,5),(2,6),(3,7),  # verticals
+        ]
+        for i, j in edges:
+            ax.plot(*zip(corners[i], corners[j]), **kwargs)
+
+    draw_box(ax, x_min, x_max, y_min, y_max, z_min, z_max, color="red", lw=1, linestyle="--")
+
+    # plot every path from the 100-particle beam
+    for path in positions_multi:
+        ax.plot(path[:, 0], path[:, 1], path[:, 2], color="blue", lw=0.5, alpha=0.25)
+
+    ax.scatter(positions_multi[:, 0, 0], positions_multi[:, 0, 1], positions_multi[:, 0, 2], color="royalblue", s=20, label="100-particle starts")
+
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_zlabel("z")
+    ax.set_title("Electric Field Map with Particle Trajectory")
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+    ax.set_zlim(z_min, z_max)
+    ax.legend(loc="upper right")
+
+    plt.tight_layout()
+    plt.savefig("field_map.png", dpi=150)
+    plt.show()
 
 # --- Tabular printout ---
 #print(f"{'Step':>6} {'x':>12} {'y':>12} {'z':>12}")

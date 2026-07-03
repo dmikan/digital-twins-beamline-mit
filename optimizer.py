@@ -50,6 +50,7 @@ Run it from a terminal with:   python optimizer.py
 import pathlib
 import re
 import subprocess
+from pathlib import Path
 
 import numpy as np
 import optuna
@@ -172,7 +173,6 @@ def run_simion(command: str) -> str:
         check=True,
     )
     return result.stdout
-
 
 def apply_voltages(chosen: dict) -> None:
     """TASK 1b: build and run the SIMION 'fastadj' command to set the voltages.
