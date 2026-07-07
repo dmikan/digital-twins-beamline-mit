@@ -1,0 +1,67 @@
+Reparametrización ortonormal de la línea de haz
+
+Objetivo
+
+En lugar de optimizar directamente los voltajes de los ocho electrodos
+libres, el optimizador trabaja sobre un conjunto de parámetros físicos
+obtenidos mediante una transformación ortonormal. La simulación continúa
+utilizando exactamente los mismos voltajes; únicamente cambia la
+representación interna empleada por el optimizador.
+
+Parámetros optimizados
+
+La transformación convierte los voltajes:
+
+-   V3, V6
+-   V9, V10, V11, V12
+-   V15, V18
+
+en los siguientes parámetros:
+
+Lentes Einzel (electrodos 3 y 6)
+
+-   Lens_common: potencial medio de ambas lentes.
+-   Lens_diff: diferencia entre ambas lentes.
+
+Cuadrupolo (electrodos 9–12)
+
+-   Quad_common: modo común.
+-   Quad_quad: componente cuadrupolar pura.
+-   Quad_dx: componente dipolar horizontal.
+-   Quad_dy: componente dipolar vertical.
+
+Estos cuatro modos se obtienen mediante una matriz de Hadamard
+normalizada (ortonormal), por lo que no existe pérdida de información y
+la transformación es exactamente invertible.
+
+Placas de deflexión (electrodos 15 y 18)
+
+-   Plate_common: potencial medio.
+-   Plate_diff: diferencia entre ambas placas.
+
+Integración con la simulación
+
+El flujo de trabajo queda:
+
+1.  El GP propone los ocho parámetros físicos.
+2.  La clase BeamlineTransform.decode() convierte esos parámetros en los
+    ocho voltajes físicos.
+3.  Los voltajes se insertan en el vector completo de 19 electrodos.
+4.  El resto del pipeline (RK4, BeamProgressScorer, SIMION y
+    Orchestrator) utiliza ese vector sin ninguna modificación.
+
+Cuando se dispone de un conjunto conocido de voltajes (por ejemplo, el
+punto inicial obtenido mediante bender_field_analysis.py), la función
+BeamlineTransform.encode() realiza la transformación inversa para
+obtener los parámetros físicos correspondientes.
+
+Ventajas
+
+-   Mantiene la misma dimensionalidad (8 variables).
+-   Introduce variables físicamente interpretables.
+-   Desacopla los modos principales del sistema.
+-   Conserva exactamente la información gracias a la transformación
+    ortonormal.
+-   Proporciona un espacio de búsqueda más adecuado para un Proceso
+    Gaussiano, ya que reduce las correlaciones artificiales entre
+    variables.
