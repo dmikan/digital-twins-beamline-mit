@@ -119,4 +119,59 @@ campos (bender_field_analysis.py): TODOS los estudios desde cero
 encontraron su primer hitter dentro de las primeras 3-7 evaluaciones
 SIMION (figura fig_convergencia.png). Dado el volumen relativo de la banda
 buena (C2: ~1e-9), encontrarla por azar era practicamente imposible.
+
+C9. BUG DEL OBJETIVO J_v2: TRANSMISION LINEAL VS RACIONAL
+--------------------------------------------------------------------------------
+El objetivo denso combina un termino de transmision con terminos de forma
+del haz (offset, halo, kurtosis, colimacion, Twiss, cuerpo). Version
+original: transmision = 1 - hits/500 (lineal). Entre 0 y 47 hits (un
+resultado real ya obtenido) ese termino solo se mueve de 1.0 a 0.906 --9%
+de su rango-- mientras los terminos de forma barren su rango completo
+[0,1] con peso comparable. Medido sobre 47 configuraciones reales del
+registro de corridas: Spearman(hits, J) = +0.020 (sin correlacion, signo
+incorrecto ya que J se minimiza) -- en la practica, el metodo "mejor
+config segun el objetivo" devolvia un candidato de 0 hits en vez del
+mejor conocido. Fix: transmision = 1/(1+hits/H0) (racional, empinada
+cerca de cero), con H0=15 (calibrado: H0=3 saturaba antes de los 30-60
+hits, rango donde ya trabajaba el proyecto) y peso subido de 0.40 a 0.50.
+Verificado: Spearman(hits, J) paso de +0.020 a -0.87.
+
+C10. GEOMETRIA DE COLISIONES: DE LOS STL AL ARCHIVO .PA0
+--------------------------------------------------------------------------------
+La transformacion rigida STL->workbench (ajustada por minimos cuadrados
+sobre 6 puntos de referencia leidos del cursor del GUI de SIMION) dejaba
+un residuo medido de ~25 mm en los centroides de los 4 electrodos del
+cuadrupolo, y 6.6 mm de mediana (16.1 mm p90) entre la superficie STL y
+el metal real. Ese residuo causaba el punto ciego del filtro RK4 en el
+cuadrupolo: predecia ~0% de transmision para candidatos que en SIMION
+transmitian ~78%. Fix: la API Lua de SIMION (pa:point(x,y,z)) devuelve a
+la vez el potencial y si el punto cae dentro de metal solido; se extrajo
+una mascara de metal directamente del .PA0 (misma fuente que el campo),
+usando fast_adjust() para fijar en 1.0 los electrodos de interes y en 0.0
+los excluidos (fuente, tubo, detector), eliminando toda dependencia del
+STL. Validacion controlada (mismo dataset, misma corrida, ambas fisicas):
+en la poblacion legada hubo empate como portero de ranking (Spearman
++0.294 fisica nueva vs +0.303 vieja), pero en la familia de la mejor
+solucion conocida la fisica nueva predijo 388/395 particulas limpias
+contra 368/384 medidas en SIMION real, mientras la fisica vieja predecia
+CERO llegada y 85% de choques contra pared fantasma para los mismos
+voltajes. Margen de contacto recalibrado de 1.5 mm (STL, colchon de
+seguridad) a 0.5 mm (PA, paredes reales).
+
+C11. CUENCAS DE OPTIMIZACION: DOS OPTIMOS DE POLARIDAD OPUESTA
+--------------------------------------------------------------------------------
+Comparando los mejores candidatos de dos corridas del sampler GP-seeded
+(mismo mecanismo de busqueda: ambas encontraron su mejor resultado en la
+iteracion 3 del loop, via rk4_rank 8 y 10, evaluaciones #78 y #80): un
+resultado con 93 hits (V3=-504, V6=-126, V9=-415) y otro con 133 hits
+(V3=+296, V6=+359, V9=+117). Distancia entre ambos: |dV| = 1241 V (norma
+L2 sobre los 8 electrodos optimizables) -- no es la misma solucion
+refinada dos veces, son regiones distintas del espacio de busqueda, con
+signo invertido en varios electrodos clave. La corrida de 93 hits quedo
+atrapada en su cuenca durante el total de sus evaluaciones sin escapar
+hacia la cuenca mejor, con el mismo algoritmo de busqueda -- la
+diferencia fue el punto de arranque, no el metodo. Ningun sampler usado
+(TPE ni GP tal como estan implementados, sin conocer la correlacion
+fisica del bender) tiene mecanismo para saltar entre cuencas separadas
+por mas de mil voltios.
 ================================================================================

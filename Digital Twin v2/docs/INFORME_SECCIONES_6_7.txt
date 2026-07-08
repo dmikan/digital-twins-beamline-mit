@@ -1,9 +1,21 @@
 ================================================================================
 BORRADOR MEJORADO -- Secciones 6 y 7 del informe
 (Redaccion del autor, con datos de respaldo insertados. Cada numero citado
-tiene su derivacion en CALCULOS_INFORME.txt, referenciada como [C1]..[C8].)
+tiene su derivacion en CALCULOS_INFORME.txt, referenciada como [C1]..[C11].)
 NOTA: en el borrador original no existe la subseccion 6.3; se mantuvo la
 numeracion del autor (6.1, 6.2, 6.4, 6.5) para que decida si renumerar.
+
+ACTUALIZACION 2026-07-08: se agregan 6.6/6.7/6.8 (nuevas) y se revisan
+7.1/7.2/7.3 con hallazgos posteriores al borrador original -- marcados
+inline como [ACTUALIZADO]. Alcance deliberado: NO se incluye ningun
+resultado obtenido por busqueda/arbitraje MANUAL de voltajes en SIMION
+(barridos dirigidos a mano); solo lo que el propio gemelo/optimizador
+encontro por si mismo. Nota de integridad de datos: las bases sqlite de
+los estudios mostraron conteos de trials distintos entre consultas
+consecutivas de la misma sesion (sincronizacion de archivos en la nube) --
+los numeros de esta version usan el snapshot vivo mas reciente al momento
+de regenerar las figuras (2026-07-08); se recomienda congelar una copia
+de los .db antes de la entrega final.
 ================================================================================
 
 6. Metodologia
@@ -160,19 +172,103 @@ version del filtro contra todo el historial de resultados reales sin
 gastar una sola corrida de SIMION, y report_figures.py regenera las
 figuras del informe desde las bases de datos persistidas.
 
+6.6 De la geometria aproximada por STL a la geometria extraida del PA [NUEVO]
+
+La geometria de colision usada para detectar choques contra electrodos
+partio de los archivos STL, ajustados al marco de SIMION por una
+transformacion rigida (rotacion + traslacion) calculada por minimos
+cuadrados sobre 6 puntos de referencia leidos a mano del cursor del GUI
+de SIMION. Esta aproximacion dejo un residuo medido de ~25 mm en los
+centroides de los 4 electrodos del cuadrupolo [C10], suficiente para
+invertir el juicio del filtro RK4 en esa zona: predecia transmision ~0%
+para candidatos que en SIMION real transmitian ~78% del haz.
+
+La correccion aprovecho que el propio archivo de arreglo de potenciales
+(.PA0) ya sabe, para cualquier punto de la grilla, si ese punto cae
+dentro de un electrodo solido -- la misma fuente de la que se extrae el
+campo electrico. Se construyo entonces una mascara de metal directamente
+desde SIMION (fijando en 1.0 los electrodos que cuentan como pared y en
+0.0 los excluidos --fuente, tubo, detector-- antes de consultar cada
+punto), eliminando la dependencia del STL desalineado. Validado contra
+los 5 casos canonicos (candidatos con transmision real conocida y
+candidatos muertos conocidos): la geometria nueva predijo 388 de 395
+particulas limpias para la mejor solucion conocida, contra 368 de 384
+medidas en SIMION real; la geometria vieja predecia CERO llegada y 85%
+de choques contra pared fantasma para ese mismo candidato [C10]. El
+margen de contacto tambien se recalibro de 1.5 mm (el colchon que
+compensaba el desalineamiento STL) a 0.5 mm (el margen fisicamente
+correcto contra paredes reales).
+
+6.7 TPE como motor principal, y la integracion de semillas del GP [NUEVO]
+
+La mayor parte del desarrollo del proyecto se trabajo con TPE
+(Tree-structured Parzen Estimator, el sampler por defecto de Optuna)
+combinado con el filtrado RK4 -- esta combinacion, robusta y barata,
+produjo las primeras soluciones reales del gemelo. El GP (proceso
+Gaussiano) ofrece una ventaja teorica que TPE no tiene -- modela
+correlaciones entre variables via su kernel de covarianza, mientras TPE
+estima cada parametro de forma independiente -- pero consultar su modelo
+real (ask()/sample_relative()) cuesta ~100-300 ms y crece con el
+historial, demasiado caro para generar los cientos de candidatos que RK4
+filtra por iteracion.
+
+La integracion adoptada paga el costo real del GP solo unas pocas veces
+por iteracion (n_gp_seeds, tipicamente 5): esas semillas informadas se
+mezclan dentro del mismo lote de candidatos que RK4 evalua, junto con
+perturbaciones baratas alrededor de ellas -- se explora el espacio amplio
+con el mecanismo barato (TPE/RK4) mientras se explota el mejor punto que
+el GP cree encontrar. La figura fig_convergencia_gemelo.png muestra el
+resultado: durante las primeras ~70-80 evaluaciones ambos motores
+corren parejos, entrelazandose (TPE incluso adelante buena parte del
+tramo); recien cerca de la evaluacion #80 el estudio GP-seeded encuentra
+un minimo considerablemente mejor y lo sostiene, mientras TPE se estanca
+en un valor peor.
+
+Matiz honesto que no debe omitirse: a IGUAL numero de evaluaciones (60
+cada uno) el panorama se empareja -- el pico de TPE en ese tramo fue
+incluso mayor que el de GP-seeded (49 vs 42 hits), y el mejor objetivo
+casi identico (0.283 vs 0.281). La ventaja grande del GP a presupuesto
+completo depende en buena parte de que corrio mas del doble de
+evaluaciones, no de una superioridad garantizada por evaluacion -- el GP
+paga su exploracion tarde y recien despega con presupuesto extra.
+
+6.8 Cuencas de optimizacion: evidencia de multiples optimos de polaridad opuesta [NUEVO]
+
+El espacio de soluciones que producen deflexion util del haz es fino y
+sensible (C2: ~1e-9 del volumen total), dificil de alcanzar por muestreo
+aleatorio. Comparando los mejores candidatos de dos corridas GP-seeded
+independientes se encontraron dos regiones de solucion con transmision
+real, pero con la polaridad de varios electrodos INVERTIDA entre si:
+distancia de 1241 V (norma L2 sobre los 8 electrodos optimizables) entre
+ambos mejores candidatos, con signo opuesto en V3, V6 y V9 [C11]. La
+corrida que quedo en la cuenca de menor transmision no escapo de ella
+durante el total de sus evaluaciones, pese a usar el mismo mecanismo de
+busqueda que la otra corrida -- la diferencia fue el punto de arranque,
+no el algoritmo.
+
+Esto conecta directamente con 6.4: ni TPE ni el GP tal como esta
+integrado hoy conocen la estructura fisica del problema (el patron de
+pares diagonales correlacionados del cuadrupolo), asi que ninguno tiene
+mecanismo para juzgar, o saltar hacia, una cuenca mejor fuera de su
+vecindario de arranque. Se retoma esta evidencia en 7.3.
+
 7. Reflexion
 
 7.1 Confianza en el gemelo digital
 
-Se debe iniciar la reflexion reconociendo la mayor debilidad del gemelo
-digital en su estado actual. El gemelo no predice un candidato de
-potenciales lo suficientemente bueno para generar una transmision mayor al
-~2% (10 de 500 iones [C7]), rango que representa un rayo que por poco
-margen presenta ciertas colisiones en el detector, pero que no representa
-el verdadero minimo del espacio de respuestas. De hecho, los splats reales
-del mejor candidato muestran que ~50 de los 500 iones llegan hasta el plano
-del detector en un grupo compacto, pero solo ~4-10 entran a la ventana
-sensible: el rayo llega, pero llega descentrado por unos pocos milimetros.
+[ACTUALIZADO] Con el objetivo corregido (6.3, ex-C9) y la geometria
+extraida del PA (6.6, ex-C10) integrados, el loop AUTONOMO (Optuna
+GP-seeded + filtro RK4 + SIMION real, sin ninguna intervencion manual de
+voltajes) encontro un candidato que transmite 133 de 500 iones (~26.6%);
+reflotado de forma independiente para verificar reproducibilidad dio 108
+de 500 (~21.6%) -- la diferencia es el ruido de disparo ya documentado
+en C6, no una regresion. Esto reemplaza el ~2% del borrador original: fue
+la version anterior del objetivo (C9) y la geometria STL (C10) las que
+limitaban al gemelo a esa cifra, no una limitacion estructural del
+enfoque. Dicho esto, el resultado sigue sin ser el minimo global del
+espacio de respuestas, y las cuencas descritas en 6.8 muestran que hay al
+menos una region alternativa de voltajes con transmision real que el
+loop no visito en esta corrida.
 
 Sin embargo, el flujo sugerido ofrece buenas razones para continuar con su
 implementacion para corregir la deficiencia del modelo actual. En esencia
@@ -220,24 +316,39 @@ SIMION.
 Asi como el gemelo demostro ser confiable para dirigir la busqueda, hay
 cuatro aspectos donde los datos nos obligan a no confiar en el.
 
-Primero, el ranking fino dentro de la cuenca buena. Cuando los candidatos
-ya estan en el vecindario correcto, las predicciones del RK4 se agrupan en
-~50 +- 4 mm mientras que los resultados reales van desde 19.7 hasta 338 mm
-(figura predicho-vs-real): el gemelo distingue el vecindario, pero no
-distingue cual candidato del vecindario va a pegar.
+Primero, el ranking fino dentro de la cuenca buena. [ACTUALIZADO] Medido
+de nuevo tras el objetivo corregido y la geometria del PA, sobre la
+region informativa actual (candidatos con senal real, n=153, figura
+fig_validacion_gemelo.png): Pearson +0.287, Spearman +0.172 entre la
+prediccion del gemelo y el resultado real de SIMION. Es un numero
+distinto al +0.458 citado antes porque mide algo distinto: aquel era el
+enriquecimiento del filtro RK4 sobre el TOTAL de 288 candidatos
+archivados (cuantos hitters reales caen en su top-30, una tarea de
+clasificacion grueso); este es la correlacion fina DENTRO de la region
+que ya sabemos tiene senal (una tarea de regresion mucho mas dificil).
+Ambas mediciones son consistentes con la misma conclusion: el gemelo
+distingue el vecindario bueno del malo con bastante confiabilidad, pero
+no ordena con precision los candidatos DENTRO del vecindario bueno.
 
-Segundo, la transmision absoluta. El RK4 sin terminacion de particulas
-predice que ~50% del haz sobrevive donde SIMION entrega 1-2%; y si se le
-activa la terminacion, se pasa al extremo pesimista y ademas pierde su
-capacidad de rankear. En resumen: el gemelo no sabe contar hits, sabe
-ordenar vecindarios, y asi es como debe usarse.
+Segundo, la transmision absoluta. Con la geometria vieja (STL), el RK4
+sin terminacion de particulas predecia que ~50% del haz sobrevivia donde
+SIMION entregaba 1-2%. Con la geometria extraida del PA (6.6) esa
+sobre-estimacion se redujo pero no desaparecio: el gemelo sigue prediciendo
+mas transmision de la que SIMION confirma para el mismo candidato, aunque
+ahora ordena correctamente vivos vs. muertos donde antes invertia el
+orden (6.6, C10). En resumen: el gemelo no sabe contar hits con precision
+absoluta, sabe ordenar vecindarios, y asi es como debe usarse.
 
-Tercero, la geometria de colisiones es aproximada. La transformacion de los
-STL al marco del experimento carga residuos de 11-15 mm, las superficies se
-muestrean cada 2 mm y el margen de colision es de 1.5 mm. Esta es
-precisamente la razon medida por la que la terminacion de particulas
-fracaso: el gemelo mata particulas en lugares levemente equivocados y borra
-la informacion de vuelo que si discrimina.
+Tercero [RESUELTO, ver 6.6], la geometria de colisiones era aproximada.
+La transformacion de los STL al marco del experimento cargaba un residuo
+medido de ~25 mm en el cuadrupolo; esa era precisamente la razon medida
+por la que la terminacion de particulas fracasaba (el gemelo mataba
+particulas en lugares equivocados y borraba la informacion de vuelo que
+si discrimina). Se corrigio extrayendo la geometria directamente del
+archivo de potenciales de SIMION (6.6); el margen de colision bajo de
+1.5 mm (colchon de seguridad sobre geometria aproximada) a 0.5 mm
+(margen fisico real). Se deja este punto en la lista, marcado como
+resuelto, para que quede trazable el antes/despues.
 
 Cuarto, la propia verdad de terreno es ruidosa. El mismo juego de voltajes
 arrojo 2, 4, 5, 8 y 10 hits en corridas repetidas e identicas de SIMION,
@@ -276,7 +387,17 @@ Segundo, aunque se realizo un analisis del cuadrupolo para desarrollar esta
 relacion fisica, esto no se generalizo para que el GP tuviera la busqueda
 construida bajo esta relacion: hoy el GP sigue explorando cuatro voltajes
 independientes cuando los datos muestran que la solucion vive sobre el
-patron correlacionado.
+patron correlacionado. [ACTUALIZADO] Esto dejo de ser una intuicion de
+diseno y paso a ser una necesidad medida: la evidencia de cuencas (6.8,
+C11) muestra dos regiones de solucion real separadas por 1241 V con
+polaridad opuesta en varios electrodos, y un estudio completo que quedo
+atrapado en la cuenca peor sin ningun mecanismo para escapar de ella. La
+ventaja especifica del GP frente a TPE -- modelar correlaciones entre
+variables via su kernel de covarianza, en vez de estimar cada parametro
+por separado -- no puede manifestarse mientras se le sigan entregando 8
+voltajes independientes; encontramos evidencia directa de que sin esa
+estructura, ninguno de los dos samplers usados tiene forma de juzgar cual
+cuenca es la correcta, ni de saltar hacia ella.
 
 Tercero, proponemos buscar por etapas, de la misma manera en que se
 sintoniza una linea de haz real: elemento por elemento en el orden en que
