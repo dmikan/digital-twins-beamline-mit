@@ -1,0 +1,177 @@
+================================================================================
+CALCULOS_INFORME.txt
+Explicacion de cada numero citado en las secciones 6 y 7 del informe:
+de donde sale, como se calculo, y donde esta la evidencia.
+================================================================================
+
+C1. COSTO POR CANDIDATO: SIMION vs RK4 (relacion ~23x)
+--------------------------------------------------------------------------------
+SIMION (medido, promediado sobre corridas reales de la sesion):
+    ~5.77 s por candidato = 5.04 s de fastadj (dominado por cargar/guardar el
+    archivo electrode_.PA0 de 290 MB y el arranque del proceso) + 0.73 s del
+    fly propiamente dicho. En las campanas se observaron valores entre 4.2 y
+    11 s por candidato. Fuente: mediciones registradas en cost_planner.py y
+    los tiempos por trial impresos en cada corrida del orchestrator.
+
+RK4 (etapa A de screening, medido):
+    239 candidatos x 50 particulas x 1500 pasos en ~55-90 s de pared
+    (tipico ~60 s), incluyendo el puntaje -> ~0.25 s por candidato.
+
+Relacion: 5.77 / 0.25 = ~23x mas barato por candidato.
+Comparacion de ventana de tiempo (para el texto): en el mismo tiempo de pared
+en que SIMION evalua ~10 candidatos (10 x 5.5 s = ~55 s), el RK4 filtra 239.
+
+C2. CUANTOS DATOS NECESITARIA UN MODELO ESTOCASTICO (surrogate)
+--------------------------------------------------------------------------------
+Un regresor estadistico (red neuronal, GP puro, etc.) necesita ejemplos
+POSITIVOS (candidatos con transmision) en su training set para aprender la
+estructura del pico; con puros ceros solo aprende "todo da cero".
+
+Medicion de la banda de hitters (86 trials con hits > 0 acumulados en todos
+los estudios; script: se recorren todas las DB y se toma min/max por
+electrodo):
+    V3: 148 V   V6: 117 V   V9: 176 V   V10: 136 V
+    V11: 78 V   V12: 246 V  V15: 206 V  V18: 180 V
+Volumen relativo de esa caja respecto del cubo de busqueda (2000 V por
+dimension, 8 dimensiones):
+    prod(ancho_i / 2000) = 1.16e-9
+=> Muestreando uniforme al azar, se espera 1 positivo cada ~8.6e8
+   evaluaciones SIMION. A 5.77 s cada una: ~1.6e2 anios por UN positivo.
+
+Cota optimista (por si la cuenca real fuera mucho mas ancha que la caja
+observada): supongase generosamente que la banda util es +-250 V en las 6
+dimensiones criticas (V3,V6,V9-V12) y libre en V15/V18:
+    (500/2000)^6 = 2.44e-4  =>  1 positivo cada ~4,100 evaluaciones.
+Para un training set con apenas ~10 positivos: ~41,000 evaluaciones SIMION
+= 41,000 x 5.77 s = ~2.7 DIAS de SIMION ininterrumpido, ~85 veces el
+presupuesto SIMION total que uso el proyecto entero (ver C7).
+
+Conclusion citable: aun en el escenario mas favorable, solo ARMAR el
+training set del modelo estocastico costaba ordenes de magnitud mas que
+todo el presupuesto del proyecto; en el escenario medido, siglos.
+
+C3. ENRIQUECIMIENTO DEL FILTRO RK4 (2.7x sobre el azar)
+--------------------------------------------------------------------------------
+Validacion offline (validate_rk4_filter.py): se re-evaluaron con el filtro
+las 288 configuraciones unicas de voltajes con resultado SIMION conocido
+(de 484 evaluaciones registradas; 61 de esas configuraciones tienen hits).
+El filtro final coloca 17 de los 61 hitters reales en su top-30.
+Si se eligieran 30 configuraciones al azar de las 288, se esperarian
+    61 x (30/288) = 6.35 hitters.
+Enriquecimiento: 17 / 6.35 = 2.7x. Correlacion de ranking: Spearman +0.458.
+(Baseline historico del filtro antes de las mejoras: Pearson +0.106.)
+
+C4. ESCALADO DEL COSTO DEL GEMELO CON LA COMPLEJIDAD DEL ARREGLO
+--------------------------------------------------------------------------------
+Costo de una tanda RK4 (modelo ajustado sobre 5 mediciones reales, ver
+cost_planner.py):
+    t(M, N, T) = T * (a + b * N * M)   segundos
+    a = 1.80e-4 s/paso   (costo fijo por paso, se paga una vez por tanda)
+    b = 2.80e-6 s/(particula*paso)  (costo marginal de interpolacion 4-D)
+Escalados:
+  - Lineal en candidatos M, particulas N y pasos T (verificado: la formula
+    predijo 115 s y una corrida real dio 131 s, error ~14%).
+  - En numero de electrodos: el costo de correr NO depende de cuantos
+    electrodos haya (el campo combinado se arma UNA vez por tanda con un
+    tensordot); lo que escala lineal con los electrodos es la PREPARACION
+    (una extraccion de campo base por electrodo con extract_PA.lua, ~1 min
+    c/u) y la memoria (19 campos base x grilla x 8 bytes).
+  - En resolucion de grilla: memoria y tensordot escalan lineal con el
+    numero de puntos de la grilla.
+Conclusion citable: el gemelo generaliza a cualquier arreglo de SIMION;
+el costo de preparacion crece lineal con los electrodos y el de corrida
+con particulas x pasos x candidatos.
+
+C5. CONCORDANCIA FUERA DE LA REGION EXPERIMENTAL
+--------------------------------------------------------------------------------
+Para voltajes uniformes al azar lejos de la cuenca, el gemelo RK4 predice
+que todo el haz muere lejos del detector (distancia media ~325 mm, plana
+entre candidatos) y SIMION real da lo mismo (~324-338 mm, plana). Ademas,
+con TODOS los voltajes optimizables en cero (solo fuente +500 V y detector
+-2000 V), ambos simuladores estrellan el haz contra la pared en z~80 mm:
+esa concordancia cualitativa fue, de hecho, la primera verificacion tras
+la correccion de unidades del RK4.
+
+C6. RUIDO DE LA VERDAD DE TERRENO (SIMION)
+--------------------------------------------------------------------------------
+El mismo juego de voltajes (el mejor encontrado) arrojo 2, 4, 5, 8 y 10
+hits en flies repetidos e identicos, porque SimpleSetUp.fly2 regenera el
+haz aleatorio en cada corrida (sin semilla fija). A transmisiones del
+orden de 10/500, el conteo de hits tiene ruido de disparo comparable a la
+senal. El objetivo denso (distancia media de splat del 10% mas cercano +
+termino de transmision) amortigua ese ruido porque usa los 500 iones de
+cada corrida, no solo los ~10 que entran a la ventana.
+
+C7. PRESUPUESTO TOTAL DEL PROYECTO
+--------------------------------------------------------------------------------
+484 evaluaciones SIMION registradas en 9 estudios (conteo directo sobre
+las bases de datos sqlite). Costo total aproximado:
+    484 x 5.77 s = ~2,790 s = ~46.5 minutos de SIMION.
+De esas, 86 trials terminaron con hits > 0. Mejor resultado: 10/500 iones
+(2% de transmision), y ~50/500 iones (~10%) llegando al plano del detector
+(medido con los splats reales, figura fig_haz_en_detector.png).
+
+C8. EFICIENCIA DE BUSQUEDA CON PUNTO INICIAL FISICO
+--------------------------------------------------------------------------------
+Historico sin conocimiento fisico: 26+ evaluaciones SIMION con voltajes
+aleatorios, 0 hits en todas. Con el punto inicial derivado del analisis de
+campos (bender_field_analysis.py): TODOS los estudios desde cero
+encontraron su primer hitter dentro de las primeras 3-7 evaluaciones
+SIMION (figura fig_convergencia.png). Dado el volumen relativo de la banda
+buena (C2: ~1e-9), encontrarla por azar era practicamente imposible.
+
+C9. BUG DEL OBJETIVO J_v2: TRANSMISION LINEAL VS RACIONAL
+--------------------------------------------------------------------------------
+El objetivo denso combina un termino de transmision con terminos de forma
+del haz (offset, halo, kurtosis, colimacion, Twiss, cuerpo). Version
+original: transmision = 1 - hits/500 (lineal). Entre 0 y 47 hits (un
+resultado real ya obtenido) ese termino solo se mueve de 1.0 a 0.906 --9%
+de su rango-- mientras los terminos de forma barren su rango completo
+[0,1] con peso comparable. Medido sobre 47 configuraciones reales del
+registro de corridas: Spearman(hits, J) = +0.020 (sin correlacion, signo
+incorrecto ya que J se minimiza) -- en la practica, el metodo "mejor
+config segun el objetivo" devolvia un candidato de 0 hits en vez del
+mejor conocido. Fix: transmision = 1/(1+hits/H0) (racional, empinada
+cerca de cero), con H0=15 (calibrado: H0=3 saturaba antes de los 30-60
+hits, rango donde ya trabajaba el proyecto) y peso subido de 0.40 a 0.50.
+Verificado: Spearman(hits, J) paso de +0.020 a -0.87.
+
+C10. GEOMETRIA DE COLISIONES: DE LOS STL AL ARCHIVO .PA0
+--------------------------------------------------------------------------------
+La transformacion rigida STL->workbench (ajustada por minimos cuadrados
+sobre 6 puntos de referencia leidos del cursor del GUI de SIMION) dejaba
+un residuo medido de ~25 mm en los centroides de los 4 electrodos del
+cuadrupolo, y 6.6 mm de mediana (16.1 mm p90) entre la superficie STL y
+el metal real. Ese residuo causaba el punto ciego del filtro RK4 en el
+cuadrupolo: predecia ~0% de transmision para candidatos que en SIMION
+transmitian ~78%. Fix: la API Lua de SIMION (pa:point(x,y,z)) devuelve a
+la vez el potencial y si el punto cae dentro de metal solido; se extrajo
+una mascara de metal directamente del .PA0 (misma fuente que el campo),
+usando fast_adjust() para fijar en 1.0 los electrodos de interes y en 0.0
+los excluidos (fuente, tubo, detector), eliminando toda dependencia del
+STL. Validacion controlada (mismo dataset, misma corrida, ambas fisicas):
+en la poblacion legada hubo empate como portero de ranking (Spearman
++0.294 fisica nueva vs +0.303 vieja), pero en la familia de la mejor
+solucion conocida la fisica nueva predijo 388/395 particulas limpias
+contra 368/384 medidas en SIMION real, mientras la fisica vieja predecia
+CERO llegada y 85% de choques contra pared fantasma para los mismos
+voltajes. Margen de contacto recalibrado de 1.5 mm (STL, colchon de
+seguridad) a 0.5 mm (PA, paredes reales).
+
+C11. CUENCAS DE OPTIMIZACION: DOS OPTIMOS DE POLARIDAD OPUESTA
+--------------------------------------------------------------------------------
+Comparando los mejores candidatos de dos corridas del sampler GP-seeded
+(mismo mecanismo de busqueda: ambas encontraron su mejor resultado en la
+iteracion 3 del loop, via rk4_rank 8 y 10, evaluaciones #78 y #80): un
+resultado con 93 hits (V3=-504, V6=-126, V9=-415) y otro con 133 hits
+(V3=+296, V6=+359, V9=+117). Distancia entre ambos: |dV| = 1241 V (norma
+L2 sobre los 8 electrodos optimizables) -- no es la misma solucion
+refinada dos veces, son regiones distintas del espacio de busqueda, con
+signo invertido en varios electrodos clave. La corrida de 93 hits quedo
+atrapada en su cuenca durante el total de sus evaluaciones sin escapar
+hacia la cuenca mejor, con el mismo algoritmo de busqueda -- la
+diferencia fue el punto de arranque, no el metodo. Ningun sampler usado
+(TPE ni GP tal como estan implementados, sin conocer la correlacion
+fisica del bender) tiene mecanismo para saltar entre cuencas separadas
+por mas de mil voltios.
+================================================================================
