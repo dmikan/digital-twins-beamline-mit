@@ -1,232 +1,228 @@
-﻿# 🔬 Digital Twin of an Ion Beamline
+﻿# 🔬 Gemelo Digital de una Línea de Haz de Iones
 
-> A physics-informed digital twin for optimizing a 90° ion bending beamline using Gaussian Processes, RK4 simulation, and SIMION as ground truth.
-
----
-
-## Overview
-
-This project implements a **digital twin** of an electrostatic ion beamline that bends a Si⁺ ion beam 90° from source to detector. The system uses a two-stage optimization loop that combines a fast physics-based RK4 surrogate model with high-fidelity SIMION simulations, guided by Bayesian optimization (Gaussian Processes via Optuna).
-
-The beamline consists of **19 electrodes**. The digital twin optimizes **8 free electrode voltages** (electrodes 3, 6, 9–12, 15, 18; range ±1000 V) to maximize ion transmission to the detector, while keeping the rest fixed (source: +500 V, detector: −2000 V, grounds).
-
-**Ion beam parameters:**
-- Species: Si⁺ (28 amu, 15 eV)
-- Initial beam: 500 ions in a 15° cone from position (395, 75, 77) mm
-- Target detector region: x ∈ [70–82] mm, y ∈ [70–83] mm, z ∈ [403–407] mm
+> Un gemelo digital basado en física para optimizar una línea de haz de iones con deflexión de 90°, usando Procesos Gaussianos, simulación RK4 y SIMION como referencia de alta fidelidad.
 
 ---
 
-## Key Results
+## Descripción general
 
-| Metric | Value |
+Este proyecto implementa un **gemelo digital** de una línea de haz de iones electrostática que deflecta un haz de Si⁺ 90° desde la fuente hasta el detector. El sistema utiliza un lazo de optimización en dos etapas que combina un modelo sustituto rápido (RK4 basado en física) con simulaciones de alta fidelidad en SIMION, guiadas por optimización bayesiana (Procesos Gaussianos vía Optuna).
+
+La línea de haz consta de **19 electrodos**. El gemelo digital optimiza **8 voltajes de electrodo libres** (electrodos 3, 6, 9–12, 15, 18; rango ±1000 V) para maximizar la transmisión de iones al detector, manteniendo el resto fijos (fuente: +500 V, detector: −2000 V, tierras).
+
+**Parámetros del haz de iones:**
+- Especie: Si⁺ (28 amu, 15 eV)
+- Haz inicial: 500 iones en un cono de 15° desde la posición (395, 75, 77) mm
+- Región del detector: x ∈ [70–82] mm, y ∈ [70–83] mm, z ∈ [403–407] mm
+
+---
+
+## Resultados clave
+
+| Métrica | Valor |
 |---|---|
-| RK4 evaluation speed | ~0.25 s/candidate |
-| SIMION evaluation speed | ~5.77 s/candidate |
-| Speed ratio (RK4 vs SIMION) | **~23×** faster |
-| RK4 filter enrichment over random | **2.7×** |
-| Hitter zone fraction of search space | ~1 × 10⁻⁹ |
-| Best known configuration | 7d bender parametrization (Search v2.1) |
+| Velocidad de evaluación RK4 | ~0,25 s/candidato |
+| Velocidad de evaluación SIMION | ~5,77 s/candidato |
+| Relación de velocidad (RK4 vs SIMION) | **~23×** más rápido |
+| Enriquecimiento del filtro RK4 sobre azar | **2,7×** |
+| Fracción de la zona con hits en el espacio de búsqueda | ~1 × 10⁻⁹ |
+| Mejor configuración conocida | Parametrización bender 7d (Search v2.1) |
 
 ---
 
-## Architecture
+## Arquitectura
 
 ```
-Optimizer (Optuna TPE / GP)
+Optimizador (Optuna TPE / GP)
         │
         ▼
- [Stage A – Cheap Screening]
-  RK4 Physics Engine
-  239 candidates × 50 particles × 1500 steps
-        │  top candidates
+ [Etapa A – Screening económico]
+  Motor de física RK4
+  239 candidatos × 50 partículas × 1500 pasos
+        │  top candidatos
         ▼
- [Stage B – Fine Screening]
-  RK4 Physics Engine
-  top-K × 200 particles × 3000 steps
+ [Etapa B – Screening fino]
+  Motor de física RK4
+  top-K × 200 partículas × 3000 pasos
         │  top-10
         ▼
- [Ground Truth Evaluation]
+ [Evaluación de referencia]
   SIMION 8.1
-        │  results feed back
-        └──────────────────────► Optuna DB (studies/)
+        │  resultados retroalimentan
+        └──────────────────────► Base de datos Optuna (studies/)
 ```
 
-The **RK4 engine** exploits the linearity of Laplace's equation: the electric field for any voltage configuration is computed as a linear superposition of 19 precomputed basis electrode fields, loaded once at startup. Trajectories are integrated in a vectorized batch (all candidates and particles simultaneously) using NumPy.
+El **motor RK4** aprovecha la linealidad de la ecuación de Laplace: el campo eléctrico para cualquier configuración de voltajes se obtiene como superposición lineal de 19 campos base precalculados, cargados una sola vez al inicio. Las trayectorias se integran en un lote vectorizado (todos los candidatos y partículas simultáneamente) usando NumPy.
 
 ---
 
-## Project Structure
+## Estructura del proyecto
 
 ```
 .
-├── gemelo_GP.py            # Trainable GP digital twin (main entry point for ML)
-├── caracterizador.py       # Beam characterizer: computes J_v2.4 objective
-├── physics.py              # RK4 integrator, composite grid, wall collision
-├── optimizer.py            # SIMION interface, electrode definitions (course baseline)
-├── basis_electrode_*.csv   # 19 precomputed basis electric field maps
-├── SimpleSetUp.*           # SIMION setup files (.iob, .fly2, .rec, .lua)
-├── derived_starting_point.json  # Physics-derived initial guess
+├── gemelo_GP.py            # Gemelo digital entrenable con GP (punto de entrada ML)
+├── caracterizador.py       # Caracterizador del haz: calcula el objetivo J_v2.4
+├── physics.py              # Integrador RK4, grilla compuesta, colisión con paredes
+├── optimizer.py            # Interfaz SIMION, definición de electrodos (base de cátedra)
+├── basis_electrode_*.csv   # 19 mapas de campo eléctrico base precalculados
+├── SimpleSetUp.*           # Archivos de configuración SIMION (.iob, .fly2, .rec, .lua)
+├── derived_starting_point.json  # Punto de partida derivado por análisis físico
 │
-├── tools/                  # Analysis and utility scripts
-│   ├── fresh_run.py        # Reproducible clean benchmark run
-│   ├── validate_rk4_filter.py   # Offline RK4 filter validation
-│   ├── bender_field_analysis.py # Quadrupole field analysis & starting point
-│   ├── sim_batch.py        # Standalone RK4 screening (no SIMION)
-│   ├── steer_scan.py       # Steering electrode scan
-│   ├── plot_rk4_trajectories.py # 3D trajectory visualization
-│   ├── report_figures.py   # Publication-quality figures
-│   ├── generate_report_pdf.py   # PDF report generator
-│   └── especificacion_gemelo_digital.md  # Full technical specification
+├── tools/                  # Scripts de análisis y utilidades
+│   ├── fresh_run.py        # Corrida de benchmark limpia y reproducible
+│   ├── validate_rk4_filter.py   # Validación offline del filtro RK4
+│   ├── bender_field_analysis.py # Análisis de campo del cuadrupolo y punto inicial
+│   ├── sim_batch.py        # Screening RK4 sin SIMION (exploración rápida)
+│   ├── steer_scan.py       # Barrido de electrodos de dirección
+│   ├── plot_rk4_trajectories.py # Visualización 3D de trayectorias
+│   ├── report_figures.py   # Figuras de publicación
+│   ├── generate_report_pdf.py   # Generador de reporte en PDF
+│   └── especificacion_gemelo_digital.md  # Especificación técnica completa
 │
-├── studies/                # Optuna SQLite databases (active studies)
+├── studies/                # Bases de datos SQLite de Optuna (estudios activos)
 │   ├── gemelo_db_v2.db
 │   ├── gemelo_v2_bender6d.db
 │   └── gemelo_v2_bender7d.db
 │
-├── outputs/                # All figures, CSVs, and reports go here
-├── docs/                   # Guides, calculations, and field notes
-│   ├── GUIA_CODIGO.txt     # Detailed code guide
-│   └── CALCULOS_INFORME.txt  # Supporting calculations for the report
-├── playpen/                # Scratch area (not used by the twin)
-└── legacy/                 # Archived studies and superseded versions
+├── outputs/                # Figuras, CSVs y reportes generados
+├── docs/                   # Guías, cálculos y bitácora
+│   ├── GUIA_CODIGO.txt     # Guía detallada del código
+│   └── CALCULOS_INFORME.txt  # Cálculos de respaldo del informe
+├── playpen/                # Área de trabajo libre (no usada por el gemelo)
+└── legacy/                 # Estudios archivados y versiones superseded
 ```
 
 ---
 
-## Quick Start
+## Inicio rápido
 
-### Prerequisites
+### Prerrequisitos
 
 ```bash
 pip install numpy scipy optuna trimesh matplotlib
-# For GP sampler (optional):
+# Para el sampler GP (opcional):
 # pip install torch
 # export KMP_DUPLICATE_LIB_OK=TRUE
 ```
 
-You also need:
-- **SIMION 8.1** installed (set `SIMION_INSTALL_DIR` in `optimizer.py`)
-- `basis_electrode_1..19.csv` — precomputed basis field maps (included)
-- `SimpleSetUp.iob` and `electrode_.PA0` — SIMION setup files (included)
+También se necesita:
+- **SIMION 8.1** instalado (configurar `SIMION_INSTALL_DIR` en `optimizer.py`)
+- `basis_electrode_1..19.csv` — mapas de campo base (incluidos)
+- `SimpleSetUp.iob` y `electrode_.PA0` — archivos de configuración SIMION (incluidos)
 
-### Using the Digital Twin Facade
+### Uso de la fachada del gemelo digital
 
 ```python
 from gemelo_GP import GemeloEntrenable
 
 tw = GemeloEntrenable()
 
-# Inspect current best configuration
+# Ver la mejor configuración actual
 print(tw.resumen())
 print(tw.mejor())
 
-# Predict with RK4 physics model (~seconds)
+# Predecir con el modelo físico RK4 (~segundos)
 tw.predecir(voltajes)
 
-# Predict with GP statistical model (instant, with uncertainty)
+# Predecir con el modelo estadístico GP (instantáneo, con incertidumbre)
 tw.predecir_modelo(voltajes)
 
-# Evaluate with real SIMION run (~6 s)
+# Evaluar con una corrida real de SIMION (~6 s)
 tw.evaluar(voltajes)
 
-# Train the GP surrogate on historical data
+# Entrenar el sustituto GP con el historial del estudio
 tw.entrenar_modelo()
 
-# Suggest new candidates via Expected Improvement
-for candidate in tw.sugerir(3):
-    print(candidate)
+# Sugerir nuevos candidatos por Expected Improvement
+for candidato in tw.sugerir(3):
+    print(candidato)
 
-# Run a full optimization cycle (uses SIMION budget)
+# Ejecutar un ciclo completo de optimización (consume presupuesto SIMION)
 tw.ciclo(rondas=1, k=2)
 ```
 
-### Running the Optimization Loop
+### Ejecutar el lazo de optimización
 
 ```bash
-# Clean benchmark run — 50 SIMION evaluations, fresh study
+# Corrida de benchmark limpia — 50 evaluaciones SIMION, estudio nuevo
 python tools/fresh_run.py 50
 
-# Continue an existing study
+# Continuar un estudio existente
 python tools/fresh_run.py 20 --continue
 
-# Validate RK4 filter offline (no SIMION cost)
+# Validar el filtro RK4 sin gastar SIMION
 python tools/validate_rk4_filter.py
 
-# Regenerate the physics-derived starting point
+# Regenerar el punto de partida físico
 python tools/bender_field_analysis.py
 ```
 
 ---
 
-## The Objective Function: J_v2.4
+## La función objetivo: J_v2.4
 
-The system minimizes a scalar objective $J_{v2.4} \in [0, 1]$ combining multiple beam quality metrics into a single value (lower = better):
+El sistema minimiza un objetivo escalar $J_{v2.4} \in [0, 1]$ que combina múltiples métricas de calidad del haz en un único valor (menor = mejor):
 
-$$J_{v2.4} = \text{normalize}\left[\alpha \cdot d_{\text{top10\%}} + \lambda\!\left(1 - \frac{\text{hits}}{N_{\text{ref}}}\right) + \text{terms}(\sigma_x, \sigma_y, \text{halo}, \text{kurtosis}, \ldots)\right]$$
+$$J_{v2.4} = \text{normalizar}\left[\alpha \cdot d_{\text{top10\%}} + \lambda\!\left(1 - \frac{\text{hits}}{N_{\text{ref}}}\right) + \text{términos}(\sigma_x, \sigma_y, \text{halo}, \text{kurtosis}, \ldots)\right]$$
 
-| Term | Description |
+| Término | Descripción |
 |---|---|
-| $d_{\text{top10\%}}$ | Mean distance of the closest 10% of ions to the detector |
-| $\lambda = 2$ | Linear transmission weight (prevents saturation at high hit counts) |
-| $\sigma_x, \sigma_y$ | RMS beam size |
-| halo fraction | Fraction of particles outside the beam core |
-| kurtosis | Distribution sharpness |
-| angular divergence | Beam opening angle |
-| Twiss emittance | Phase-space beam quality |
+| $d_{\text{top10\%}}$ | Distancia media del 10% de iones más cercanos al detector |
+| $\lambda = 2$ | Peso de transmisión lineal (evita saturación con muchos hits) |
+| $\sigma_x, \sigma_y$ | Tamaño RMS del haz |
+| fracción de halo | Fracción de partículas fuera del núcleo del haz |
+| kurtosis | Agudeza de la distribución |
+| divergencia angular | Ángulo de apertura del haz |
+| emitancia de Twiss | Calidad del haz en el espacio de fases |
 
 ---
 
-## Quadrupole Reparametrization
+## Reparametrización del cuadrupolo
 
-To reduce the effective search dimensionality, the four quadrupole electrode voltages (V₉–V₁₂) are encoded using three physical parameters:
+Para reducir la dimensionalidad efectiva del problema, los cuatro voltajes del cuadrupolo (V₉–V₁₂) se codifican con tres parámetros físicos:
 
-| Parameter | Physical meaning |
+| Parámetro | Significado físico |
 |---|---|
-| **A** | Common voltage offset |
-| **B** | Main bending strength |
-| **C** | Horizontal asymmetry |
+| **A** | Desplazamiento común (offset) |
+| **B** | Intensidad principal de flexión |
+| **C** | Término de asimetría horizontal |
 
 $$V_9 = A + B + C \quad V_{10} = A - B \quad V_{11} = A - B \quad V_{12} = A + B - C$$
 
-This encoding preserves the physical symmetry of the quadrupole while reducing the dimensionality of the optimization problem.
+Esta codificación preserva la simetría física del cuadrupolo y reduce la dimensionalidad del espacio de búsqueda.
 
 ---
 
-## RK4 Physics Engine
+## Motor de física RK4
 
-The fast surrogate integrates ion trajectories using a 4th-order Runge-Kutta integrator:
+El sustituto rápido integra las trayectorias de iones con un integrador Runge-Kutta de cuarto orden:
 
-- **Time step:** $dt = 10^{-8}$ s → ~0.6 mm per step
-- **Basis superposition:** field = linear combination of 19 precomputed basis fields
-- **Composite grid:** high-resolution local boxes (1.0 mm quadrupole, 2.5 mm collimators) over a coarser global grid (2.0 mm) → **15× memory reduction**
-- **Wall collision:** metal voxels extracted from SIMION's `.PA0`, queried via spatial tree every 3 integration steps (4.2× speedup over every-step checking)
-
----
-
-## Reproducibility Notes
-
-- Stage A beam seed: **42** | Stage B beam seed: **1234**
-- SIMION's ion source is not seeded → hit counts may fluctuate slightly between identical runs
-- `fresh_run.py` refuses to overwrite an existing study DB, guaranteeing true fresh starts
-- Perturbation seeds are deterministic: `seed = 1000 × n_trials + iteration`
+- **Paso temporal:** $dt = 10^{-8}$ s → ~0,6 mm por paso
+- **Superposición de campos base:** campo = combinación lineal de 19 campos base precalculados
+- **Grilla compuesta:** cajas locales de alta resolución (1,0 mm cuadrupolo, 2,5 mm colimadores) sobre una grilla global más gruesa (2,0 mm) → **reducción de memoria 15×**
+- **Colisión con paredes:** vóxeles metálicos extraídos del archivo `.PA0` de SIMION, consultados via árbol espacial cada 3 pasos de integración (aceleración 4,2× respecto a chequear en cada paso)
 
 ---
 
-## Documentation
+## Notas de reproducibilidad
 
-| File | Contents |
+- Semilla del haz etapa A: **42** | Semilla etapa B: **1234**
+- La fuente de iones de SIMION no tiene semilla fijada → el conteo de hits puede fluctuar levemente entre corridas idénticas
+- `fresh_run.py` rechaza sobreescribir una base de datos existente, garantizando verdaderos arranques desde cero
+- Las semillas de perturbación son deterministas: `semilla = 1000 × n_trials + iteración`
+
+---
+
+## Documentación
+
+| Archivo | Contenido |
 |---|---|
-| [`docs/GUIA_CODIGO.txt`](docs/GUIA_CODIGO.txt) | Full code guide: what each file does, how to run each workflow, tunable parameters |
-| [`docs/CALCULOS_INFORME.txt`](docs/CALCULOS_INFORME.txt) | Supporting calculations cited in the technical report |
-| [`tools/especificacion_gemelo_digital.md`](tools/especificacion_gemelo_digital.md) | Full technical specification: architecture, hyperparameters, validation methodology |
+| [`docs/GUIA_CODIGO.txt`](docs/GUIA_CODIGO.txt) | Guía completa del código: qué hace cada archivo, cómo ejecutar cada flujo, parámetros ajustables |
+| [`docs/CALCULOS_INFORME.txt`](docs/CALCULOS_INFORME.txt) | Cálculos de respaldo citados en el informe técnico |
+| [`tools/especificacion_gemelo_digital.md`](tools/especificacion_gemelo_digital.md) | Especificación técnica completa: arquitectura, hiperparámetros, metodología de validación |
 
 ---
 
-## License
+## Licencia
 
-This project was developed as part of a research collaboration. Please contact the authors before reusing or redistributing.
-
----
-
-*Developed at MIT · 2026*
+Este proyecto fue desarrollado como parte de una colaboración de investigación. Por favor contacta a los autores antes de reutilizar o redistribuir.
