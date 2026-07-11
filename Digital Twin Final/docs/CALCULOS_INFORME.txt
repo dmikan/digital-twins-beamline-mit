@@ -174,4 +174,65 @@ diferencia fue el punto de arranque, no el metodo. Ningun sampler usado
 (TPE ni GP tal como estan implementados, sin conocer la correlacion
 fisica del bender) tiene mecanismo para saltar entre cuencas separadas
 por mas de mil voltios.
+
+C12. REPARAMETRIZACION DEL BENDER: COORDENADAS A/B/C Y GESTION DE COTAS
+--------------------------------------------------------------------------------
+Mapeo implementado en expand_bender(): V9 = A+B+C, V10 = A-B, V11 = A-B,
+V12 = A+B-C, con A = offset comun, B = intensidad de flexion (patron
+diagonal derivado del bender field analysis) y C = asimetria dipolar
+horizontal. Cotas iniciales A,B en +-500 V: la primera corrida mostro el
+mejor B derivando (-244 -> -382) sin meseta, senal de truncamiento, y se
+ampliaron a A +-600, B +-800 (nota en optimizer.py, 2026-07-08). La misma
+firma aparece hoy en C: en la corrida v2.4 del bender6d, 4 de los 5
+mejores hitters tienen C clavado en la cota +-600 (C=600.0 exacto en el
+mejor bender7d de Search Final), pendiente de ampliar. Resultados de
+campana (61 trials c/u, misma receta): el bender6d logro el record
+absoluto del proyecto (113/500 hits, Search Final Prev) y en el
+head-to-head del 2026-07-10 duplico la media de hits del 8D original
+(24.3 vs 10.0); el bender7d encontro la cuenca asimetrica arrancando
+desde 0.0 V sin sesgo. Variacion entre corridas identicas del bender6d:
+113 -> 57 -> 88 hits, consistente con el ruido de arranque/semilla (C6).
+
+C13. SEGUNDA FALLA DEL OBJETIVO: SATURACION EN EL REGIMEN ALTO DE HITS
+--------------------------------------------------------------------------------
+El termino de transmision saturante 1/(1+hits/H0) con H0=15 (el fix
+correcto del bug de C9 para el regimen 0-30 hits) aporta ~0.0005 de J
+por hit marginal a hits~100. Consecuencia medida: J rankeaba la cuenca
+de Search v2.1/v2.2 (84 hits, J=0.170) por encima de la de TES-GP-GP6D
+(105 hits, J=0.227), porque la brecha de terminos cosmeticos
+(offset+twiss+colimacion+halo ~0.066) supera el credito maximo posible
+de +21 hits con esa forma funcional (~0.028, optimizando H0 -- ningun
+valor de H0 lo arregla). Dentro de cada cuenca J y hits si correlacionan
+(Pearson -0.842 en TES-GP-GP6D): la falla es exclusivamente ENTRE
+cuencas. Fix (objetivo v2.4): termino lineal aditivo
+lambda*(1 - hits/n_total) con lambda=2, y re-normalizacion del total por
+(1+lambda) para conservar J en [0,1] sin pared (rescale uniforme, no
+altera ordenamientos). Verificado contra los trials reales: re-ordena
+105 > 95 > 84 > 74 hits con los cosmeticos desempatando iguales.
+Colaterales corregidos: BAD_SCORE subio de 1.0 a 2.0 (con el tope viejo,
+un vuelo fallido de SIMION empataba con un config valido de 0 hits), y
+se agrego el test de regresion T5 (falla con lambda=0, pasa con
+lambda=2). ADVERTENCIA: los J pre- y post-v2.4 no son comparables entre
+si -- comparar campanas por hits.
+
+C14. RUBRICA DE EVALUACION FORMAL Y SELECCION DEL GEMELO CENTRAL
+--------------------------------------------------------------------------------
+Rubrica ejecutable (evaluate_twin.py / evaluate_all_twins_recursive.py):
+Score = G x (0.30*C + 0.20*A + 0.15*I + 0.15*E + 0.10*D + 0.10*F), con
+G = compuerta de admisibilidad fisica, C = hits del recomendado vs
+referencia (113), A = Spearman en region informativa, I = linealidad R2
+de la consigna inversa, E = honestidad de incertidumbre lejana, D =
+alineacion de gradiente GP-SIMION, F = eficiencia (trial del primer
+>=30 hits). Top-3 del barrido recursivo sobre todos los .db: (1) bender6d
+Search Final Prev 0.712 (113 hits, pero A=0.155, el peor ranking fino de
+la tabla); (2) bender6d Search v2.2 0.631 (84 hits, A=0.426, el gemelo
+mejor calibrado); (3) bender7d Search v2.1 0.573. GEMELO SELECCIONADO
+(decision 2026-07-10): el bender7d de Search v2.1, restaurado como
+studies/gemelo_v2_bender7d.db (md5 identico al archivado; 68 trials).
+Su perfil medido: J=0.1820 (escala pre-v2.4) con 74 hits en el
+recomendado (trial #83: V3=310, V6=-372, A=-281.6, B=-284.1, C=300.5,
+V15=-66.6, V18=-81.2); mejor hitter trial #69 con 83 hits; fortalezas
+I=0.852 y E=1.0, debilidades F=0.267 (primer >=30 hits en el trial #44)
+y D=0.187. Nota: la constante de referencia de C (113) es el propio
+record del bender6d; si un run futuro lo supera hay que actualizarla.
 ================================================================================
